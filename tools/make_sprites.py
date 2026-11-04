@@ -1,337 +1,408 @@
-"""Pixel-art sprite strips for the pet ("团子", a mochi blob with a leaf sprout).
-48x48 frames, drawn at 3x in the app. Run: python3 tools/make_sprites.py
-Outputs src/sprites/<anim>.png (horizontal strips), sprites.json, tools/preview.png
+"""团子 v0.7 sprites: daifuku mochi (direction A). 48x48 frames, drawn at 3x in the app.
+Run: python3 tools/make_sprites.py
+Outputs src/sprites/<anim>.png (+ -s1..s3 sprout stages), sprites.json, tools/preview.png
 """
 from PIL import Image
-import os, json
+import os, json, math, sys
 
 S = 48
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, '..', 'src', 'sprites')
+OUT = os.environ.get('SPRITE_OUT') or os.path.join(HERE, '..', 'src', 'sprites')
+PREVIEW = os.environ.get('SPRITE_PREVIEW') or os.path.join(HERE, 'preview.png')
 os.makedirs(OUT, exist_ok=True)
 
-P = dict(
-    ol=(122, 74, 64), ol2=(150, 96, 80),                # warm outlines
-    hi=(255, 253, 240), lt=(255, 241, 196), base=(255, 222, 150),
-    sh=(244, 185, 112), sh2=(226, 154, 98),
-    belly=(255, 247, 226),
-    blush=(255, 146, 158), blush2=(255, 190, 196),
-    eye=(58, 38, 52), eye2=(104, 70, 110), white=(255, 255, 255),
-    leaf=(132, 206, 112), leaf2=(84, 160, 92), stem=(96, 150, 80),
-    mouth=(196, 82, 96), tongue=(255, 128, 140),
-    sweat=(140, 204, 255), sweat2=(88, 156, 230),
-    zz=(140, 160, 255), red=(240, 84, 84), red2=(170, 50, 60),
-    gray=(176, 180, 200), gold=(255, 210, 70), pink=(255, 120, 150),
-    bag=(110, 170, 210), bag2=(70, 120, 170), strap=(80, 110, 150),
-    # v0.6 sprout stages: tired, wilting, withered
-    leafy=(190, 196, 96), leafy2=(140, 146, 62), wither=(184, 136, 84), wither2=(124, 86, 56),
-)
+def hx(h, a=255):
+    if isinstance(h, tuple): return h
+    h = h.lstrip('#'); return (int(h[0:2],16), int(h[2:4],16), int(h[4:6],16), a)
 
-# v0.6: the sprout is the stress meter. 0 = perky, 1 = drooping, 2 = wilting, 3 = withered.
-STAGE = 0
+# hue-shifted ramps: shadows cooler/purpler, highlights warmer; plum selective outline
+P = dict(hi='#FFFFFF', lt='#FFF8EC', base='#FBE9D7', sh='#EBC9BE', sh2='#C99CA6',
+         ol='#6E4458', ol2='#A06F82', eye='#2E1F33', blush='#FF8FA8', mouth='#B8475F',
+         maw='#5A2236', tongue='#FF8FA0', tongue2='#E5677F', white='#FFFFFF', glint2='#DDEFFF',
+         sw1='#BFE6FF', sw2='#6AAEF0', sw3='#3B6FB8',
+         gold='#FFD34E', gold2='#FFF6C2', gold3='#E0A93A', dgold='#E8C778', dgold2='#F3E3B0', dgold3='#C9A56A',
+         pink='#FF7FA0', pink2='#FFC2D1', red='#F05454', red2='#A8323C', gray='#B9B3D0', zz='#8C9CFF',
+         bag='#6EAAD2', bag2='#4A7FB0', bag3='#2F4F7A', mint='#7FD6A0', cookie='#E8B46A', cookie2='#B97D44')
+LEAF = dict(l1='#B9F07A', l2='#6FCB5C', stem='#3E8A4A', ol='#24553A',
+            y1='#E8E07A', y2='#C2B44E', w1='#C9A06A', w2='#93683F', wol='#5E4030')
+SHADOW = (70, 40, 70, 70)
+GROUND = 43
+STAGE = 0   # sprout = stress meter: 0 perky, 1 sagging, 2 yellow droop, 3 withered
 
-class F:
-    def __init__(self):
-        self.im = Image.new('RGBA', (S, S), (0, 0, 0, 0)); self.px = self.im.load()
-    def put(self, x, y, c):
-        x, y = int(round(x)), int(round(y))
-        if 0 <= x < S and 0 <= y < S: self.px[x, y] = P[c] + (255,)
-    def rect(self, x, y, w, h, c):
-        for i in range(w):
-            for j in range(h): self.put(x + i, y + j, c)
-    def blob(self, cx, cy, rx, ry, fill, ol='ol', shade=None):
-        """Filled ellipse with a 1px outline; optional shading callback(nx, ny)->color."""
-        pts = set()
-        for y in range(S):
-            for x in range(S):
-                if ((x + .5 - cx) / rx) ** 2 + ((y + .5 - cy) / ry) ** 2 <= 1: pts.add((x, y))
-        for (x, y) in pts:
-            edge = any((x + a, y + b) not in pts for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1)))
-            if edge: self.put(x, y, ol)
-            else:
-                nx, ny = (x + .5 - cx) / rx, (y + .5 - cy) / ry
-                self.put(x, y, shade(nx, ny) if shade else fill)
-        return pts
+class C:
+    def __init__(s): s.im = Image.new('RGBA', (S, S), (0,0,0,0)); s.p = s.im.load()
+    def put(s, x, y, c):
+        x, y = int(x), int(y)
+        if 0 <= x < S and 0 <= y < S and c is not None: s.p[x, y] = hx(P.get(c, c) if isinstance(c, str) else c)
+    def get(s, x, y): return s.p[x, y] if 0 <= x < S and 0 <= y < S else (0,0,0,0)
+    def pts(s, pts, c, ox=0, oy=0):
+        for x, y in pts: s.put(x+ox, y+oy, c)
+    def under(s, x, y, c):   # paint only on empty pixels
+        if s.get(x, y)[3] == 0: s.put(x, y, c)
 
-def hang(f, x0, y0, d, col, ol, short=False):
-    """A pixel leaf hanging down and outward from (x0, y0); d = -1 left, 1 right."""
-    core = [(0, 0), (1, 0), (1, 1), (2, 1), (2, 2), (3, 2), (2, 3), (3, 3)] if not short else [(0, 0), (0, 1), (1, 1), (1, 2), (0, 2)]
-    pts = {(x0 + d * a, y0 + b) for a, b in core}
-    ring = {(x + a, y + b) for x, y in pts for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1))} - pts
-    for x, y in ring: f.put(x, y, ol)
-    for x, y in pts: f.put(x, y, col)
+N4 = ((1,0),(-1,0),(0,1),(0,-1))
+def ring_of(pts): return {(a+i, b+j) for a, b in pts for i, j in N4} - set(pts)
 
-def body_shade(nx, ny):
-    # soft spherical light from the top-left
-    if (nx + .42) ** 2 / .045 + (ny + .55) ** 2 / .025 <= 1: return 'hi'
-    r = (nx + .22) ** 2 + (ny + .30) ** 2
-    if r > 1.62: return 'sh2'
-    if r > 1.22: return 'sh'
-    if ny > .3 and nx * nx / .3 + (ny - .7) ** 2 / .14 <= 1: return 'belly'
-    if (nx + .3) ** 2 / .22 + (ny + .38) ** 2 / .14 <= 1: return 'lt'
-    return 'base'
+# ---------- body ----------
+def shape_mochi(cx, by, w, h):
+    cy = by - h*0.42
+    def inside(x, y):
+        if y > by: return False
+        if y <= cy: return ((x-cx)/(w/2))**2 + ((y-cy)/(h*0.58))**2 <= 1
+        t = (y - cy) / (by - cy); half = w/2 * (1 - 0.10*t**3); r = 3.5
+        if by - y < r:
+            ex = half - r
+            return abs(x-cx) <= ex or (abs(x-cx)-ex)**2 + (y-(by-r))**2 <= r*r
+        return abs(x-cx) <= half
+    return inside
 
-def frame(dx=0, dy=0, sq=0, eyes='open', mouth='w', sweat=0, arms='down', fx=(),
-          feet='stand', flat=False, tears=False, look=0, bag=False, facing=0):
-    f = F()
-    if flat: cx, cy, rx, ry = 24 + dx, 39, 20, 7
-    else:    cx, cy, rx, ry = 24 + dx, 30 + dy + sq * .5, 17 + sq * .6, 14 - sq * .6
-    bottom = cy + ry
+def tidy(m):
+    for _ in range(2):
+        m |= {(x, y) for y in range(S) for x in range(S) if (x, y) not in m and sum((x+a, y+b) in m for a, b in N4) >= 3}
+        m -= {(x, y) for (x, y) in m if sum((x+a, y+b) in m for a, b in N4) <= 1}
+    return m
 
-    # backpack (behind body, peeks out on one side)
-    if bag and not flat:
-        bx = cx - rx - 3 if facing >= 0 else cx + rx - 5
-        f.blob(bx + 4, cy + 1, 6, 8, 'bag', shade=lambda nx, ny: 'bag2' if nx > .3 else 'bag')
+def paint_body(c, m):
+    xs = [x for x, _ in m]; ys = [y for _, y in m]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys); w, h = x1-x0+1, y1-y0+1
+    edge = {(x, y) for (x, y) in m if any((x+a, y+b) not in m for a, b in N4)}
+    for (x, y) in m:
+        nx = (x + .5 - (x0 + w/2)) / (w/2); ny = (y + .5 - (y0 + h/2)) / (h/2)
+        if (x, y) in edge:
+            lit = (x, y-1) not in m and ny < 0.2 or (x-1, y) not in m and nx < 0 and ny < .3
+            c.put(x, y, 'ol2' if lit else 'ol'); continue
+        r = (nx + .35)**2 + (ny + .45)**2
+        col = 'base'
+        if r > 1.85: col = 'sh2'
+        elif r > 1.30: col = 'sh'
+        elif (nx + .25)**2/0.42 + (ny + .2)**2/0.36 <= 1: col = 'lt'
+        c.put(x, y, col)
+    hx0, hy0 = x0 + int(w*0.24), y0 + int(h*0.20)
+    for (a, b) in ((0,0),(1,0),(0,1),(2,-1)):
+        if (hx0+a, hy0+b) in m and (hx0+a, hy0+b) not in edge: c.put(hx0+a, hy0+b, 'hi')
+    return x0, y0, x1, y1
 
-    # feet
-    if not flat:
-        fy = bottom - 1
-        if feet == 'stand': L, R = (cx - 8, fy), (cx + 8, fy)
-        elif feet == 'walkA': L, R = (cx - 10, fy - 1), (cx + 7, fy + 1)
-        elif feet == 'walkB': L, R = (cx - 7, fy + 1), (cx + 10, fy - 1)
-        elif feet == 'air': L, R = (cx - 6, fy + 2), (cx + 6, fy + 2)
-        for (x, y) in (L, R): f.blob(x, y, 4, 2.6, 'sh', ol='ol')
+def oval(c, cx, cy, rx, ry, fill='base', shade='sh', ol='ol', behind=False):
+    pts = {(x, y) for y in range(S) for x in range(S) if ((x+.5-cx)/rx)**2 + ((y+.5-cy)/ry)**2 <= 1}
+    edge = {p for p in pts if any((p[0]+a, p[1]+b) not in pts for a, b in N4)}
+    for (x, y) in pts:
+        col = ol if (x, y) in edge else (shade if y + .5 > cy + ry*0.25 else fill)
+        (c.under if behind else c.put)(x, y, col)
+    return pts
+
+def shadow(c, cx, w):
+    for x in range(int(cx - w/2), int(cx + w/2) + 1):
+        for y in (GROUND + 1, GROUND + 2):
+            if ((x + .5 - cx)/(w/2))**2 + ((y - GROUND - 1.5)/1.3)**2 <= 1: c.under(x, y, SHADOW)
+
+# ---------- sprout ----------
+def sprout(c, x, y, stage):
+    L = LEAF
+    if stage == 0:
+        stem = [(x, y-1), (x, y-2), (x, y-3)]
+        left = [(x-1,y-4),(x-2,y-4),(x-3,y-4),(x-4,y-5),(x-2,y-5),(x-3,y-5),(x-1,y-5)]
+        right= [(x+1,y-4),(x+2,y-5),(x+3,y-5),(x+4,y-6),(x+1,y-5),(x+2,y-6),(x+3,y-6),(x+5,y-7)]
+        f1, f2, sc, ol = L['l1'], L['l2'], L['stem'], L['ol']
+    elif stage in (1, 2):
+        stem = [(x, y-1), (x, y-2), (x, y-3), (x+1, y-4)]
+        left = [(x-1,y-4),(x-2,y-4),(x-3,y-3),(x-4,y-2),(x-2,y-3),(x-3,y-2),(x-4,y-1)]
+        right= [(x+2,y-4),(x+3,y-4),(x+4,y-3),(x+5,y-2),(x+3,y-3),(x+4,y-2),(x+5,y-1)]
+        if stage == 1: f1, f2, sc, ol = L['l1'], L['l2'], L['stem'], L['ol']
+        else:          f1, f2, sc, ol = L['y1'], L['y2'], L['y2'], L['ol']
     else:
-        for x in (cx - 15, cx + 15): f.blob(x, cy - 7, 3, 3.5, 'sh')
+        stem = [(x, y-1), (x+1, y-2), (x+2, y-2)]
+        left = [(x+3,y-1),(x+4,y-1),(x+4,y)]
+        right= [(x+3,y-2),(x+4,y-2),(x+5,y-1)]
+        f1, f2, sc, ol = L['w1'], L['w2'], L['w2'], L['wol']
+    allp = set(stem) | set(left) | set(right)
+    for p in ring_of(allp): c.under(*p, ol)
+    c.pts(stem, sc); c.pts(left, f2); c.pts(right, f1)
+    if stage == 0: c.put(x+3, y-6, L['l2'])
 
-    # arms behind body edge
-    ay = cy + 2
-    def nub(x, y, rx_=3, ry_=3.5): f.blob(x, y, rx_, ry_, 'base', shade=lambda nx, ny: 'sh' if ny > .2 else 'base')
+# ---------- face parts ----------
+EYE_OPEN = [(1,0),(0,1),(1,1),(2,1),(0,2),(1,2),(2,2),(0,3),(1,3),(2,3)]
+EYE_ROUND = [(1,0),(2,0),(0,1),(1,1),(2,1),(3,1),(0,2),(1,2),(2,2),(3,2),(0,3),(1,3),(2,3),(3,3),(1,4),(2,4)]
+SPIRAL7 = [".XXXXX.", "X.....X", "X.XXX.X", "X.X.X.X", "X.X...X", "X..XXX.", ".X....."]
+
+def eye_open(c, ex, ey):
+    c.pts(EYE_OPEN, 'eye', ex, ey); c.put(ex, ey+1, 'white'); c.put(ex+1, ey+1, 'white')
+
+def eye_round(c, ex, ey, px=0, wet=False):
+    c.pts(EYE_ROUND, 'eye', ex, ey); c.put(ex+1+px, ey+1, 'white')
+    if wet: c.put(ex+1+px, ey+2, 'white'); c.put(ex+2, ey+3, 'glint2')
+
+def brows(c, lx, rx, y):
+    c.pts([(0,1),(1,1),(2,0)], 'eye', lx, y); c.pts([(0,0),(1,1),(2,1)], 'eye', rx, y)
+
+def eye_spiral(c, ex, ey):
+    for b, row in enumerate(SPIRAL7):
+        for a, ch in enumerate(row):
+            if ch == 'X': c.put(ex+a, ey+b, 'eye')
+
+def eye_x(c, ex, ey):
+    for k in range(4): c.put(ex+k, ey+k, 'eye'); c.put(ex+3-k, ey+k, 'eye')
+
+def blush(c, cx, y, gap, w=3):
+    for side in (-1, 1):
+        bx = cx + side*gap - (w-1 if side < 0 else 0)
+        for a in range(w): c.put(bx+a, y, 'blush')
+
+def mouth(c, mx, my, kind):
+    e = 'eye'
+    if kind == 'w':      c.pts([(-1,0),(0,1),(1,0)], e, mx, my)
+    elif kind == 'flat': c.pts([(-1,0),(0,0),(1,0)], e, mx, my)
+    elif kind == 'wave': c.pts([(-2,1),(-1,0),(0,1),(1,0),(2,1)], e, mx, my)
+    elif kind == 'o':
+        c.pts([(0,0),(-1,1),(1,1),(0,2)], e, mx, my); c.put(mx, my+1, 'mouth')
+    elif kind == 'open':
+        c.pts([(-2,0),(-1,0),(0,0),(1,0),(2,0),(-2,1),(2,1),(-1,2),(0,2),(1,2)], e, mx, my)
+        c.pts([(-1,1),(1,1)], 'maw', mx, my); c.put(mx, my+1, 'tongue')
+    elif kind == 'scream':
+        rim = [(-2,0),(-1,0),(0,0),(1,0),(2,0),(-3,1),(3,1),(-3,2),(3,2),(-2,3),(2,3),(-1,4),(0,4),(1,4)]
+        inner = [(-2,1),(-1,1),(0,1),(1,1),(2,1),(-2,2),(-1,2),(0,2),(1,2),(2,2),(-1,3),(0,3),(1,3)]
+        c.pts(rim, e, mx, my); c.pts(inner, 'maw', mx, my); c.pts([(-1,3),(0,3),(1,3),(0,2)], 'tongue', mx, my)
+    elif kind == 'tongue':
+        c.pts([(-1,0),(0,0),(1,0)], e, mx, my); c.put(mx+1, my+1, 'tongue'); c.put(mx+1, my+2, 'tongue2')
+
+def drop(c, x, y):
+    pts = [(x, y), (x-1, y+1), (x, y+1), (x+1, y+1), (x-1, y+2), (x, y+2), (x+1, y+2), (x, y+3)]
+    for p in ring_of(pts): c.under(*p, 'sw3')
+    c.pts(pts, 'sw2'); c.put(x-1, y+1, 'sw1'); c.put(x, y, 'sw1')
+
+def tear(c, x, y, n=4):
+    for i in range(n): c.put(x, y+i, 'sw2' if i else 'sw1')
+
+def star(c, x, y, bright=True, small=False):
+    g, w, d = ('gold', 'gold2', 'gold3') if bright else ('dgold', 'dgold2', 'dgold3')
+    if small:
+        c.pts([(0,-1),(0,1),(-1,0),(1,0)], g, x, y); c.put(x, y, w); return
+    c.pts([(0,-2),(0,2),(-2,0),(2,0)], d, x, y)
+    c.pts([(a, b) for a in (-1,0,1) for b in (-1,0,1)], g, x, y); c.put(x, y, w)
+
+def star_ring(c, cx, cy, rx, ry, phase=0, n=3):
+    for i in range(n):
+        t = phase + i * 2*math.pi/n
+        x = cx + rx*math.cos(t); y = cy + ry*math.sin(t) - 2*math.cos(t)
+        front = math.sin(t) > 0
+        if front or c.get(int(x), int(y))[3] == 0: star(c, int(round(x)), int(round(y)), front)
+
+def ghost(c, x, y):
+    pts = [(1,0),(2,0),(3,0),(0,1),(1,1),(2,1),(3,1),(4,1),(0,2),(1,2),(2,2),(3,2),(4,2),(0,3),(1,3),(2,3),(3,3),(4,3),(0,4),(2,4),(4,4)]
+    for a, b in ring_of(pts): c.put(x+a, y+b, 'gray')
+    for a, b in pts: c.put(x+a, y+b, (255,255,255,230))
+    c.put(x+1, y+2, 'eye'); c.put(x+3, y+2, 'eye')
+
+HEART = [(0,0),(1,0),(3,0),(4,0),(-1,1),(0,1),(1,1),(2,1),(3,1),(4,1),(5,1),(0,2),(1,2),(2,2),(3,2),(4,2),(1,3),(2,3),(3,3),(2,4)]
+HEART_S = [(0,0),(2,0),(-1,1),(0,1),(1,1),(2,1),(3,1),(0,2),(1,2),(2,2),(1,3)]
+def heart(c, x, y, small=False):
+    pts = HEART_S if small else HEART
+    for p in ring_of(pts): c.under(p[0]+x, p[1]+y, 'red2')
+    c.pts(pts, 'pink', x, y); c.put(x, y+1, 'pink2')
+
+# ---------- frame ----------
+def frame(dx=0, dy=0, sq=0, eyes='open', mouth_='w', sweat=0, arms=None, fx=(), feet=None,
+          flat=False, look=0, bag=False, facing=0):
+    c = C()
+    cx = 24 + dx
+    if flat: w, h, by = 44, 11, GROUND
+    else:    w, h, by = 34 + sq*1.2, 26 - sq*1.0, GROUND + dy
+    m = tidy({(x, y) for y in range(S) for x in range(S) if shape_mochi(cx, by + .99, w, h)(x + .5, y + .5)})
+    shadow(c, cx, int(w*0.8*(1 - max(0, -dy)*0.05)))
+    rows = {}
+    for (x, y) in m: rows.setdefault(y, [x, x]); rows[y][0] = min(rows[y][0], x); rows[y][1] = max(rows[y][1], x)
+    y0 = min(rows); y1 = max(rows); bh = y1 - y0
+    def edge(y, side): y = max(y0, min(y1, int(y))); return rows[y][0] if side < 0 else rows[y][1]
+    mid = y0 + int(bh*0.55)
+
+    # behind the body: backpack, side arms, feet
+    if bag:
+        bx = edge(mid, -1) if facing >= 0 else edge(mid, 1)
+        oval(c, bx + (1 if facing >= 0 else -1), mid, 5, 7, 'bag', 'bag2', 'bag3')
+    def nub(side, yy, out=1):
+        oval(c, edge(yy, side) + side*out + .5, yy + .5, 3, 3)
     if not flat:
-        if arms == 'down':   nub(cx - rx, ay); nub(cx + rx, ay)
-        elif arms == 'up':   nub(cx - rx - 2, ay - 11); nub(cx + rx + 2, ay - 11)
-        elif arms == 'flailA': nub(cx - rx - 3, ay - 8); nub(cx + rx + 2, ay + 3)
-        elif arms == 'flailB': nub(cx - rx - 2, ay + 3); nub(cx + rx + 3, ay - 8)
-        elif arms == 'wave1': nub(cx - rx, ay); nub(cx + rx + 3, ay - 10)
-        elif arms == 'wave2': nub(cx - rx, ay); nub(cx + rx + 5, ay - 7)
-        elif arms == 'thumb': nub(cx - rx, ay)
+        A = {'down': ((-1, mid+3, 0), (1, mid+3, 0)),
+             'up': ((-1, y0+8, 3), (1, y0+8, 3)),
+             'flailA': ((-1, y0+5, 2), (1, mid+5, 1)),
+             'flailB': ((-1, mid+5, 1), (1, y0+5, 2)),
+             'wave1': ((-1, mid+3, 0), (1, y0+3, 3)),
+             'wave2': ((-1, mid+3, 0), (1, y0+7, 4)),
+             'thumb': ((-1, mid+3, 0),),
+             'face': ((-1, mid+3, 0),)}.get(arms, ())
+        for side, yy, out in A: nub(side, yy, out)
+        if feet:
+            fy = y1 + 1
+            off = {'walkA': ((-9, -1), (6, 1)), 'walkB': ((-6, 1), (9, -1)), 'air': ((-6, 1), (6, 1))}[feet]
+            for ox, oy in off: oval(c, cx + ox + .5, fy + oy, 3, 2, 'sh', 'sh2')
 
-    # body
-    f.blob(cx, cy, rx, ry, 'base', shade=body_shade)
+    x0, y0, x1, y1 = paint_body(c, m)
+    top = min(y for (x, y) in m if abs(x - cx) <= 1)
 
-    # sprout: stem + two leaves, drooping as stress rises (STAGE)
-    if not flat:
-        top = cy - ry
-        leafshade = lambda nx, ny: 'lt' if nx < -.3 and ny < 0 else 'leaf'
-        if STAGE == 0:
-            for k in range(4): f.put(cx, top - k, 'stem')
-            f.blob(cx - 4, top - 4, 4, 2.2, 'leaf', ol='leaf2', shade=leafshade)
-            f.blob(cx + 4, top - 5, 4, 2.2, 'leaf', ol='leaf2', shade=leafshade)
-        elif STAGE == 1:   # leaves sag to the sides
-            for k in range(3): f.put(cx, top - k, 'stem')
-            f.blob(cx - 5, top - 1.5, 4, 2, 'leaf', ol='leaf2')
-            f.blob(cx + 5, top - 2, 4, 2, 'leaf', ol='leaf2')
-        elif STAGE == 2:   # yellowing, both leaves hanging down from a tired stem
-            for k in range(4): f.put(cx, top - k, 'stem')
-            hang(f, cx - 1, top - 3, -1, 'leafy', 'leafy2'); hang(f, cx + 1, top - 3, 1, 'leafy', 'leafy2')
-        else:              # withered: stem bent over, one dry brown leaf left
-            for k in range(3): f.put(cx, top - k, 'wither2')
-            for k in range(1, 4): f.put(cx + k, top - 3, 'wither2')
-            hang(f, cx + 4, top - 2, 1, 'wither', 'wither2', short=True)
+    # sprout
+    if flat: sprout(c, cx + 1, top, 3)
+    else:    sprout(c, cx, top, STAGE)
 
-    # face
-    ex = cx + look + (2 if facing > 0 else -2 if facing < 0 else 0)
-    ey = cy - 1 if not flat else cy - 2
-    EL, ER = int(ex) - 8, int(ex) + 5   # left edge of each eye (3 wide)
+    fcx = cx + look + (2 if facing > 0 else -2 if facing < 0 else 0)
+    if flat: ey = y0 + 3
+    else:    ey = y0 + int((y1 - y0)*0.42)
+    L3, R3 = fcx - 7, fcx + 6         # 3-wide eyes
+    L4, R4 = fcx - 8, fcx + 6         # 4-wide eyes
+    my = ey + 5; bly = ey + 5; bgap = 8
 
-    # blush
-    if eyes != 'x':
-        for X in (EL - 3, ER + 2):
-            f.rect(X, int(ey) + 5, 4, 2, 'blush'); f.put(X, int(ey) + 5, 'blush2')
+    if eyes == 'open':
+        eye_open(c, L3, ey); eye_open(c, R3, ey); my = ey + 4
+    elif eyes == 'blink':
+        for X in (L3, R3): c.pts([(0,2),(1,2),(2,2)], 'eye', X, ey)
+        my = ey + 4
+    elif eyes == 'happy':
+        for X in (L4, R4): c.pts([(0,2),(1,1),(2,1),(3,2)], 'eye', X, ey)
+        my = ey + 4
+    elif eyes == 'sleep':
+        for X in (L4, R4): c.pts([(0,1),(1,2),(2,2),(3,1)], 'eye', X, ey)
+        my = ey + 4
+    elif eyes in ('look', 'round'):       # alert glance / surprised
+        px = 1 if eyes == 'look' else 0
+        eye_round(c, L4 + px, ey, px=px); eye_round(c, R4 + px, ey, px=px); bly = ey + 6; my = ey + 6
+    elif eyes == 'wide':                  # nervous 1: glance + worried brows
+        eye_round(c, L4 + 1, ey + 1, px=1); eye_round(c, R4 + 1, ey + 1, px=1)
+        brows(c, L4, R4 + 2, ey - 2); bly = ey + 7; my = ey + 6; fcx += 1
+    elif eyes == 'teary':                 # panic 2
+        eye_round(c, L4, ey, wet=True); eye_round(c, R4, ey, wet=True)
+        brows(c, L4, R4 + 1, ey - 3)
+        tear(c, L4, ey + 4); tear(c, R4 + 3, ey + 4); bly = ey + 6; my = ey + 5; bgap = 10
+    elif eyes == 'spiral':
+        eye_spiral(c, fcx - 11, ey - 1); eye_spiral(c, fcx + 4, ey - 1); bly = ey + 7; my = ey + 6; bgap = 10
+    elif eyes == 'x':
+        eye_x(c, fcx - 9, ey); eye_x(c, fcx + 5, ey); my = ey + 3; bly = ey + 4; bgap = 13
+    elif eyes == 'dot':
+        for X in (L3, R3): c.pts([(0,1),(1,1),(0,2),(1,2)], 'eye', X + 1, ey)
+        my = ey + 4
 
-    for X in (EL, ER):
-        Y = int(ey)
-        if eyes == 'open':
-            f.rect(X, Y - 1, 4, 6, 'eye'); f.rect(X, Y + 3, 4, 2, 'eye2')
-            f.rect(X, Y - 1, 2, 2, 'white'); f.put(X + 3, Y + 3, 'white')
-            f.put(X, Y - 1, 'eye'); f.put(X + 3, Y - 1, 'eye'); f.put(X, Y + 4, 'eye'); f.put(X + 3, Y + 4, 'eye')
-        elif eyes == 'blink':
-            f.rect(X, Y + 3, 4, 1, 'eye'); f.put(X - 1, Y + 2, 'eye')
-        elif eyes == 'happy':   # ^ ^
-            f.put(X, Y + 2, 'eye'); f.put(X + 1, Y + 1, 'eye'); f.put(X + 2, Y + 1, 'eye'); f.put(X + 3, Y + 2, 'eye')
-            f.put(X - 1, Y + 3, 'eye'); f.put(X + 4, Y + 3, 'eye')
-        elif eyes == 'sleep':   # u u
-            f.put(X - 1, Y + 1, 'eye'); f.put(X, Y + 2, 'eye'); f.rect(X + 1, Y + 3, 2, 1, 'eye'); f.put(X + 3, Y + 2, 'eye'); f.put(X + 4, Y + 1, 'eye')
-        elif eyes == 'look':    # alert, small pupils glancing down
-            f.rect(X - 1, Y - 1, 6, 6, 'white'); f.rect(X + 1, Y + 2, 3, 3, 'eye'); f.put(X + 1, Y + 2, 'white')
-            for a in range(6): f.put(X - 1 + a, Y - 2, 'ol')
-            f.put(X - 2, Y - 1, 'ol'); f.put(X + 5, Y - 1, 'ol')
-        elif eyes == 'wide':    # shaking pinpoint pupils
-            f.rect(X - 1, Y - 2, 6, 7, 'white'); f.rect(X + 1, Y + 1, 2, 2, 'eye')
-            for a in range(6): f.put(X - 1 + a, Y - 3, 'ol'); f.put(X - 1 + a, Y + 5, 'ol')
-            for b in range(7): f.put(X - 2, Y - 2 + b, 'ol'); f.put(X + 5, Y - 2 + b, 'ol')
-        elif eyes == 'swirl':   # panic: > <
-            f.put(X, Y, 'eye'); f.put(X + 1, Y + 1, 'eye'); f.put(X + 2, Y + 2, 'eye'); f.put(X + 1, Y + 3, 'eye'); f.put(X, Y + 4, 'eye')
-        elif eyes == 'x':
-            for k in range(4): f.put(X + k, Y + k, 'eye'); f.put(X + 3 - k, Y + k, 'eye')
-        elif eyes == 'dot':
-            f.rect(X + 1, Y + 2, 2, 2, 'eye')
-    if eyes == 'swirl':  # mirror the right eye into "<"
-        X, Y = ER, int(ey)
-        for (a, b) in ((0, 0), (1, 1), (2, 2), (1, 3), (0, 4)): f.put(X + a, Y + b, 'base')
-        for (a, b) in ((3, 0), (2, 1), (1, 2), (2, 3), (3, 4)): f.put(X + a, Y + b, 'eye')
+    if arms != 'face' or True:
+        blush(c, fcx, bly, bgap, 3)
+    mouth(c, fcx if mouth_ != 'tongue' else fcx - 1, my, mouth_)
 
-    # mouth
-    mx, my = int(ex), int(ey) + 6
-    if mouth == 'w':      # ω
-        for (a, b) in ((-3, 0), (-2, 1), (-1, 0), (0, 1), (1, 0)): f.put(mx + a, my + b, 'ol')
-    elif mouth == 'flat': f.rect(mx - 2, my, 3, 1, 'ol')
-    elif mouth == 'o':    f.rect(mx - 2, my, 3, 2, 'mouth'); f.rect(mx - 2, my - 1, 3, 1, 'ol'); f.rect(mx - 2, my + 2, 3, 1, 'ol')
-    elif mouth == 'wave':
-        for k, o in enumerate((0, 1, 0, 1, 0, 1)): f.put(mx - 3 + k, my + o, 'ol')
-    elif mouth == 'scream':
-        f.rect(mx - 3, my - 1, 5, 4, 'mouth'); f.rect(mx - 2, my + 2, 3, 1, 'tongue')
-        f.rect(mx - 3, my - 2, 5, 1, 'ol'); f.rect(mx - 3, my + 3, 5, 1, 'ol'); f.put(mx - 4, my, 'ol'); f.put(mx + 2, my, 'ol')
-    elif mouth == 'open': # happy open D
-        f.rect(mx - 3, my, 5, 2, 'mouth'); f.rect(mx - 2, my + 2, 3, 1, 'mouth'); f.rect(mx - 3, my, 5, 1, 'ol'); f.put(mx - 1, my + 2, 'tongue')
-    elif mouth == 'tongue':
-        f.rect(mx - 2, my, 4, 1, 'ol'); f.rect(mx, my + 1, 2, 3, 'tongue'); f.put(mx + 1, my + 3, 'mouth')
+    spots = [(x1 - 2, y0 + 1), (x0, y0 + 4), (x1 + 1, y0 + 8)]
+    for (x, y) in spots[:sweat]: drop(c, x, y)
 
-    # sweat drops (outlined teardrops)
-    def drop(x, y):
-        f.put(x + 1, y, 'sweat2'); f.rect(x, y + 1, 3, 3, 'sweat'); f.put(x, y + 1, 'white')
-        f.put(x - 1, y + 2, 'sweat2'); f.put(x + 3, y + 2, 'sweat2'); f.rect(x, y + 4, 3, 1, 'sweat2')
-    spots = [(cx + rx - 2, cy - ry + 2), (cx - rx - 2, cy - ry + 5), (cx + rx + 2, cy - 2)]
-    for (x, y) in spots[:sweat]: drop(int(x), int(y))
-    if tears:
-        for X in (EL + 1, ER + 2):
-            for k in range(5): f.put(X, int(ey) + 5 + k, 'sweat')
-            f.put(X, int(ey) + 10, 'sweat2')
-
-    # thumb in front of body
+    # in front of the body
     if arms == 'thumb':
-        tx, ty = int(cx + rx) - 2, int(ay) - 2
-        f.blob(tx + 2, ty + 2, 3.5, 3.5, 'base', shade=lambda nx, ny: 'sh' if ny > .2 else 'base')
-        f.rect(tx + 1, ty - 4, 3, 4, 'base'); f.rect(tx, ty - 5, 5, 1, 'ol')
-        for k in range(5): f.put(tx, ty - 4 + k, 'ol'); f.put(tx + 4, ty - 4 + k, 'ol')
-    if arms == 'ears':  # both paws pressed to the sides of the head
-        for X in (cx - rx + 3, cx + rx - 3):
-            f.blob(X, cy - 5, 3.5, 4, 'base', shade=lambda nx, ny: 'sh' if ny > .3 else 'base')
-    if arms == 'face':  # paw over the right eye
-        nub(cx - rx, ay)
-        f.blob(ER + 2, int(ey) + 1, 5, 4.5, 'base', shade=lambda nx, ny: 'sh' if ny > .3 else 'base')
+        tx, ty = edge(mid, 1) - 2, mid
+        oval(c, tx + .5, ty + .5, 3.5, 3.5)
+        thumb = [(0,0),(1,0),(0,1),(1,1),(0,2),(1,2)]
+        for p in ring_of(thumb): c.put(p[0] + tx - 1, p[1] + ty - 6, 'ol')
+        c.pts(thumb, 'base', tx - 1, ty - 6); c.put(tx - 1, ty - 6, 'lt')
+    if arms == 'ears':
+        for side in (-1, 1): oval(c, edge(ey, side) - side*1 + .5, ey + .5, 3, 4)
+    if arms == 'face':
+        px_, py_ = R3 + 2, ey + 2
+        oval(c, px_ + .5, py_ + .5, 4, 3.5, 'lt', 'sh')
+        for k in (-1, 1): c.put(px_ + k, py_ - 2, 'ol2'); c.put(px_ + k, py_ - 1, 'ol2')
 
     # effects
     def Z(x, y, n):
-        f.rect(x, y, n, 1, 'zz'); f.rect(x, y + n - 1, n, 1, 'zz')
-        for k in range(1, n - 1): f.put(x + n - 1 - k, y + k, 'zz')
-    if 'z1' in fx: Z(36, 9, 4)
-    if 'z2' in fx: Z(35, 11, 4); Z(40, 3, 6)
+        for k in range(n): c.put(x+k, y, 'zz'); c.put(x+k, y+n-1, 'zz')
+        for k in range(1, n-1): c.put(x+n-1-k, y+k, 'zz')
+    if 'z1' in fx: Z(37, 9, 4)
+    if 'z2' in fx: Z(36, 11, 4); Z(40, 3, 6)
     if 'excl' in fx:
-        f.rect(39, 3, 3, 7, 'red'); f.rect(39, 11, 3, 3, 'red')
-        for y in range(2, 15):
-            if y not in (10,): f.put(38, y, 'red2'); f.put(42, y, 'red2')
+        bar = [(x, y) for x in range(39, 42) for y in range(2, 9)] + [(x, y) for x in range(39, 42) for y in range(10, 13)]
+        for p in ring_of(bar): c.put(*p, 'red2')
+        c.pts(bar, 'red'); c.put(39, 2, 'pink2')
     if 'lines' in fx:
-        for y in (20, 28, 36): f.rect(0, y, 5, 1, 'gray')
+        for y in (22, 30, 38):
+            for k in range(5): c.put(k, y, 'gray')
     if 'lines2' in fx:
-        for y in (24, 32): f.rect(1, y, 6, 1, 'gray')
+        for y in (26, 34):
+            for k in range(6): c.put(k + 1, y, 'gray')
     if 'linesR' in fx:
-        for y in (22, 30, 38): f.rect(43, y, 5, 1, 'gray')
-    if 'soul1' in fx or 'soul2' in fx:
-        sy = 22 if 'soul1' in fx else 15
-        f.blob(24, sy, 4, 4, 'white', ol='gray'); f.rect(23, sy + 3, 3, 3, 'white')
-        f.put(22, sy + 6, 'white'); f.put(25, sy + 6, 'white'); f.put(23, sy - 1, 'eye'); f.put(25, sy - 1, 'eye')
-    if 'star' in fx:
-        x, y = 40, 8
-        f.put(x, y - 2, 'gold'); f.put(x, y + 2, 'gold'); f.put(x - 2, y, 'gold'); f.put(x + 2, y, 'gold')
-        f.rect(x - 1, y - 1, 3, 3, 'gold'); f.put(x, y, 'white')
-    if 'heart' in fx:
-        x, y = 8, 8
-        for (a, b) in ((0, 0), (1, 0), (3, 0), (4, 0), (-1, 1), (0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1),
-                       (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (1, 3), (2, 3), (3, 3), (2, 4)): f.put(x + a, y + b, 'pink')
-        f.put(x, y + 1, 'white')
+        for y in (24, 32, 40):
+            for k in range(5): c.put(43 + k, y, 'gray')
+    if 'soul1' in fx: ghost(c, cx + 5, y0 - 11)
+    if 'soul2' in fx: ghost(c, cx + 7, y0 - 17)
+    if 'star' in fx: star(c, 40, 8)
+    if 'heart' in fx: heart(c, 6, 8)
+    if 'heart2' in fx: heart(c, 37, 6); heart(c, 5, 13)
+    if 'heart3' in fx: heart(c, 40, 11, True); heart(c, 4, 6, True)
     if 'gloom' in fx:
-        for x in range(10, 38, 4): f.rect(x, 4, 1, 3, 'gray')
-    if 'heart2' in fx:
-        for (x, y) in ((36, 6), (6, 14)):
-            for (a, b) in ((0, 0), (1, 0), (3, 0), (4, 0), (-1, 1), (0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1),
-                           (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (1, 3), (2, 3), (3, 3), (2, 4)): f.put(x + a, y + b, 'pink')
-            f.put(x, y + 1, 'white')
-    if 'heart3' in fx:
-        for (x, y) in ((40, 12), (3, 6)):
-            for (a, b) in ((0, 0), (2, 0), (-1, 1), (0, 1), (1, 1), (2, 1), (3, 1), (0, 2), (1, 2), (2, 2), (1, 3)): f.put(x + a, y + b, 'pink')
-    if 'dizzyA' in fx or 'dizzyB' in fx:
-        pts = ((12, 6), (24, 2), (36, 6)) if 'dizzyA' in fx else ((16, 3), (30, 3), (40, 9))
-        for (x, y) in pts:
-            f.put(x, y - 1, 'gold'); f.put(x, y + 1, 'gold'); f.put(x - 1, y, 'gold'); f.put(x + 1, y, 'gold'); f.put(x, y, 'white')
+        for x in range(12, 38, 4):
+            for k in range(3): c.put(x, 3 + k + (x // 4) % 2, 'gray')
+    if 'ringA' in fx: star_ring(c, cx, y0 - 2, 19, 4, phase=0.9)
+    if 'ringB' in fx: star_ring(c, cx, y0 - 2, 19, 4, phase=0.9 + math.pi/3)
     if 'cookie' in fx or 'cookie2' in fx:
         x, y = 24, 38
-        f.blob(x, y, 5.5, 4.5, 'gold', ol='ol', shade=lambda nx, ny: 'sh' if ny > .3 else 'gold')
-        for (a, b) in ((-2, -1), (1, 0), (-1, 2), (2, -2)): f.put(x + a, y + b, 'ol2')
-        if 'cookie2' in fx:  # bitten
-            for (a, b) in ((3, -3), (4, -2), (4, -3), (5, -1), (3, -2)): f.put(x + a, y + b, 'base')
+        pts = oval(c, x, y, 4.5, 3.5, 'cookie', 'cookie2', 'ol')
+        for (a, b) in ((-2, -1), (1, 0), (-1, 1), (2, -1)): c.put(x + a, y + b, 'cookie2')
+        if 'cookie2' in fx:
+            for (a, b) in ((3, -3), (4, -2), (3, -2), (4, -1)): c.put(x + a, y + b, 'base')
+            c.put(2 + x, y - 3, 'ol'); c.put(3 + x, y - 1, 'ol'); c.put(4 + x, y, 'ol')
     if 'crumbs' in fx:
-        for (x, y) in ((12, 40), (35, 42), (16, 44), (32, 38)): f.put(x, y, 'gold')
+        for (x, y) in ((12, 41), (35, 42), (16, 44), (32, 40)): c.put(x, y, 'cookie')
     if 'confA' in fx or 'confB' in fx:
-        cs = ('pink', 'gold', 'leaf', 'sweat', 'red')
+        cs = ('pink', 'gold', 'mint', 'sw2', 'red')
         pts = ((5, 4), (14, 10), (33, 3), (42, 12), (9, 18), (38, 20)) if 'confA' in fx else ((7, 9), (18, 3), (30, 9), (40, 4), (4, 22), (43, 18))
-        for i, (x, y) in enumerate(pts): f.rect(x, y, 2, 2, cs[i % 5])
+        for i, (x, y) in enumerate(pts):
+            for a in (0, 1):
+                for b in (0, 1): c.put(x + a, y + b, cs[i % 5])
     if 'qmark' in fx:
-        for (a, b) in ((1, 0), (2, 0), (3, 1), (3, 2), (2, 3), (1, 4), (1, 5), (1, 7)): f.put(38 + a, 4 + b, 'ol2')
+        q = [(1,0),(2,0),(3,1),(3,2),(2,3),(1,4),(1,5),(1,7)]
+        c.pts(q, 'ol', 39, 3); c.pts([(2,0)], 'ol2', 39, 3)
     if 'tilde' in fx:
-        for k, o in enumerate((0, 1, 1, 0, 0, 1)): f.put(36 + k, 10 + o, 'ol2')
-    return f.im
+        for k, o in enumerate((0, 1, 1, 0, 0, 1)): c.put(37 + k, 9 + o, 'ol2')
+    return c.im
 
+F = frame
 STRIP_FNS = {
-    'idle':     [lambda: frame(), lambda: frame(sq=1, dy=1), lambda: frame(), lambda: frame(eyes='blink')],
-    'alert':    [lambda: frame(eyes='look', mouth='flat', fx=('excl',), dy=-1), lambda: frame(eyes='look', mouth='flat', look=1)],
-    'nervous':  [lambda: frame(dx=-1, eyes='wide', mouth='wave', sweat=1), lambda: frame(dx=1, eyes='wide', mouth='wave', sweat=2),
-                 lambda: frame(dx=-1, eyes='wide', mouth='wave', sweat=2), lambda: frame(dx=1, eyes='wide', mouth='wave', sweat=1)],
-    'panic':    [lambda: frame(eyes='swirl', mouth='scream', sweat=3, arms='flailA', feet='walkA', fx=('lines',), tears=True, facing=1),
-                 lambda: frame(dy=-3, eyes='swirl', mouth='scream', sweat=2, arms='flailB', feet='walkB', fx=('lines2',), tears=True, facing=1),
-                 lambda: frame(eyes='swirl', mouth='scream', sweat=3, arms='flailA', feet='walkA', fx=('lines',), tears=True, facing=1),
-                 lambda: frame(dy=-3, eyes='swirl', mouth='scream', sweat=2, arms='flailB', feet='walkB', fx=('lines2',), tears=True, facing=1)],
-    'collapse': [lambda: frame(flat=True, eyes='x', mouth='tongue', fx=('soul1',)), lambda: frame(flat=True, eyes='x', mouth='tongue', fx=('soul2',))],
-    'sleep':    [lambda: frame(eyes='sleep', mouth='flat', sq=1, dy=1, fx=('z1',)), lambda: frame(eyes='sleep', mouth='o', fx=('z2',))],
-    'jump':     [lambda: frame(sq=4, dy=3, eyes='happy', mouth='open'), lambda: frame(dy=-7, sq=-2, eyes='happy', mouth='open', arms='up', feet='air', fx=('star',)),
-                 lambda: frame(dy=-4, eyes='open', mouth='w', arms='up', feet='air')],
-    'thumbs':   [lambda: frame(eyes='happy', mouth='open', arms='thumb', fx=('star',)), lambda: frame(eyes='happy', mouth='w', arms='thumb', fx=('heart',))],
-    'facepalm': [lambda: frame(eyes='dot', mouth='flat', arms='face', fx=('gloom',)), lambda: frame(eyes='dot', mouth='wave', arms='face', dy=1, fx=('gloom',))],
-    # 17:30: puts on the backpack, waves, then walks off to the right
-    'offwork':  [lambda: frame(eyes='happy', mouth='open', arms='wave1', bag=True), lambda: frame(eyes='happy', mouth='open', arms='wave2', bag=True)],
-    'walk':     [lambda: frame(eyes='happy', mouth='w', feet='walkA', bag=True, facing=1),
-                 lambda: frame(dy=-1, eyes='happy', mouth='w', feet='walkB', bag=True, facing=1)],
-    # v0.5 interactions
-    'poke':     [lambda: frame(sq=4, dy=2, dx=2, eyes='blink', mouth='o', fx=('linesR',)), lambda: frame(sq=2, dy=1, dx=1, eyes='dot', mouth='o')],
-    'dizzy':    [lambda: frame(dx=-1, eyes='swirl', mouth='wave', fx=('dizzyA',)), lambda: frame(dx=1, eyes='swirl', mouth='wave', fx=('dizzyB',))],
-    'happy':    [lambda: frame(dx=-1, eyes='happy', mouth='w', fx=('heart2',)), lambda: frame(sq=1, dy=1, eyes='happy', mouth='open', fx=('heart3',)),
-                 lambda: frame(dx=1, eyes='happy', mouth='w', fx=('heart2',))],
-    'eat':      [lambda: frame(eyes='open', mouth='o', fx=('cookie',)), lambda: frame(sq=1, dy=1, eyes='happy', mouth='open', fx=('cookie2',)),
-                 lambda: frame(eyes='happy', mouth='w', fx=('crumbs',)), lambda: frame(sq=1, dy=1, eyes='happy', mouth='open', fx=('crumbs', 'heart'))],
-    'held':     [lambda: frame(dy=-2, sq=-2, eyes='wide', mouth='o', arms='up', feet='air', fx=('lines2',)),
-                 lambda: frame(dy=-3, sq=-2, dx=1, eyes='wide', mouth='o', arms='up', feet='air', fx=('linesR',))],
-    'stretch':  [lambda: frame(sq=-3, dy=-2, eyes='sleep', mouth='o', arms='up'), lambda: frame(sq=-1, eyes='happy', mouth='w', arms='up', fx=('tilde',))],
-    # v0.6: no keyboard permission yet (macOS) - covers its ears, can't hear you
-    'deaf':     [lambda: frame(eyes='dot', mouth='wave', arms='ears', fx=('qmark',)),
-                 lambda: frame(dy=1, sq=1, eyes='blink', mouth='wave', arms='ears', fx=('qmark',))],
-    'cheer':    [lambda: frame(dy=-6, sq=-2, eyes='happy', mouth='open', arms='up', feet='air', fx=('confA',)),
-                 lambda: frame(sq=2, dy=1, eyes='happy', mouth='open', arms='up', fx=('confB',))],
+    'idle':     [lambda: F(), lambda: F(sq=1, dy=0), lambda: F(), lambda: F(eyes='blink')],
+    'alert':    [lambda: F(eyes='look', mouth_='flat', fx=('excl',), dy=-1), lambda: F(eyes='look', mouth_='flat', look=1)],
+    'nervous':  [lambda: F(dx=-1, eyes='wide', mouth_='wave', sweat=1), lambda: F(dx=1, eyes='wide', mouth_='wave', sweat=1),
+                 lambda: F(dx=-1, eyes='wide', mouth_='wave', sweat=2), lambda: F(dx=1, eyes='wide', mouth_='wave', sweat=1)],
+    'panic':    [lambda: F(sq=1, eyes='teary', mouth_='scream', sweat=2, arms='flailA', feet='walkA', fx=('lines',)),
+                 lambda: F(sq=1, dy=-3, eyes='teary', mouth_='scream', sweat=1, arms='flailB', feet='walkB', fx=('lines2',)),
+                 lambda: F(sq=1, eyes='teary', mouth_='scream', sweat=3, arms='flailA', feet='walkA', fx=('lines',)),
+                 lambda: F(sq=1, dy=-3, eyes='teary', mouth_='scream', sweat=1, arms='flailB', feet='walkB', fx=('lines2',))],
+    'collapse': [lambda: F(flat=True, eyes='x', mouth_='tongue', fx=('soul1',)), lambda: F(flat=True, eyes='x', mouth_='tongue', fx=('soul2',))],
+    'sleep':    [lambda: F(eyes='sleep', mouth_='flat', sq=1, fx=('z1',)), lambda: F(eyes='sleep', mouth_='o', fx=('z2',))],
+    'jump':     [lambda: F(sq=4, eyes='happy', mouth_='open'), lambda: F(dy=-7, sq=-2, eyes='happy', mouth_='open', arms='up', feet='air', fx=('star',)),
+                 lambda: F(dy=-4, eyes='open', mouth_='w', arms='up', feet='air')],
+    'thumbs':   [lambda: F(eyes='happy', mouth_='open', arms='thumb', fx=('star',)), lambda: F(eyes='happy', mouth_='w', arms='thumb', fx=('heart',))],
+    'facepalm': [lambda: F(eyes='dot', mouth_='flat', arms='face', fx=('gloom',)), lambda: F(eyes='dot', mouth_='wave', arms='face', sq=1, fx=('gloom',))],
+    'offwork':  [lambda: F(eyes='happy', mouth_='open', arms='wave1', bag=True), lambda: F(eyes='happy', mouth_='open', arms='wave2', bag=True)],
+    'walk':     [lambda: F(eyes='happy', mouth_='w', feet='walkA', bag=True, facing=1),
+                 lambda: F(dy=-1, eyes='happy', mouth_='w', feet='walkB', bag=True, facing=1)],
+    'poke':     [lambda: F(sq=4, dx=2, eyes='blink', mouth_='o', fx=('linesR',)), lambda: F(sq=2, dx=1, eyes='dot', mouth_='o')],
+    'dizzy':    [lambda: F(dx=-1, eyes='spiral', mouth_='wave', fx=('ringA',)), lambda: F(dx=1, eyes='spiral', mouth_='wave', fx=('ringB',))],
+    'happy':    [lambda: F(dx=-1, eyes='happy', mouth_='w', fx=('heart2',)), lambda: F(sq=1, eyes='happy', mouth_='open', fx=('heart3',)),
+                 lambda: F(dx=1, eyes='happy', mouth_='w', fx=('heart2',))],
+    'eat':      [lambda: F(eyes='open', mouth_='o', fx=('cookie',)), lambda: F(sq=1, eyes='happy', mouth_='open', fx=('cookie2',)),
+                 lambda: F(eyes='happy', mouth_='w', fx=('crumbs',)), lambda: F(sq=1, eyes='happy', mouth_='open', fx=('crumbs', 'heart'))],
+    'held':     [lambda: F(dy=-2, sq=-2, eyes='round', mouth_='o', arms='up', feet='air', fx=('lines2',)),
+                 lambda: F(dy=-3, sq=-2, dx=1, eyes='round', mouth_='o', arms='up', feet='air', fx=('linesR',))],
+    'stretch':  [lambda: F(sq=-3, dy=-1, eyes='sleep', mouth_='o', arms='up'), lambda: F(sq=-1, eyes='happy', mouth_='w', arms='up', fx=('tilde',))],
+    'deaf':     [lambda: F(eyes='dot', mouth_='wave', arms='ears', fx=('qmark',)),
+                 lambda: F(sq=1, eyes='blink', mouth_='wave', arms='ears', fx=('qmark',))],
+    'cheer':    [lambda: F(dy=-6, sq=-2, eyes='happy', mouth_='open', arms='up', feet='air', fx=('confA',)),
+                 lambda: F(sq=2, eyes='happy', mouth_='open', arms='up', fx=('confB',))],
 }
-
-STRIP_ARGS = None  # filled below; strips are rebuilt per sprout stage
-
-def build():
-    return {k: [fn() for fn in v] for k, v in STRIP_FNS.items()}
-
-meta = {}
 NO_SPROUT = {'collapse'}
-for stage in range(4):
-    STAGE = stage
-    strips = build()
-    for name, frames in strips.items():
-        if stage and name in NO_SPROUT: continue
-        strip = Image.new('RGBA', (S * len(frames), S), (0, 0, 0, 0))
-        for i, im in enumerate(frames): strip.paste(im, (i * S, 0))
-        strip.save(os.path.join(OUT, f'{name}.png' if stage == 0 else f'{name}-s{stage}.png'))
-        meta[name] = len(frames)
-STAGE = 0
-STRIPS = build()
-with open(os.path.join(OUT, 'sprites.json'), 'w') as fp: json.dump({'size': S, 'frames': meta, 'stages': 4}, fp)
 
-Z = 4; cols = max(meta.values())
-prev = Image.new('RGBA', (cols * S * Z, len(STRIPS) * S * Z), (238, 232, 246, 255))
-for r, frames in enumerate(STRIPS.values()):
-    for i, im in enumerate(frames):
-        prev.alpha_composite(im.resize((S * Z, S * Z), Image.NEAREST), (i * S * Z, r * S * Z))
-prev.save(os.path.join(HERE, 'preview.png'))
-print(meta)
+def build(): return {k: [fn() for fn in v] for k, v in STRIP_FNS.items()}
+
+if __name__ == '__main__':
+    meta = {}
+    for stage in range(4):
+        STAGE = stage
+        for name, frames in build().items():
+            if stage and name in NO_SPROUT: continue
+            strip = Image.new('RGBA', (S*len(frames), S), (0,0,0,0))
+            for i, im in enumerate(frames): strip.paste(im, (i*S, 0))
+            strip.save(os.path.join(OUT, f'{name}.png' if stage == 0 else f'{name}-s{stage}.png'))
+            meta[name] = len(frames)
+    STAGE = 0; STRIPS = build()
+    with open(os.path.join(OUT, 'sprites.json'), 'w') as fp: json.dump({'size': S, 'frames': meta, 'stages': 4}, fp)
+    Z = 4; cols = max(meta.values())
+    prev = Image.new('RGBA', (cols*S*Z, len(STRIPS)*S*Z), (233, 230, 242, 255))
+    for r, frames in enumerate(STRIPS.values()):
+        for i, im in enumerate(frames): prev.alpha_composite(im.resize((S*Z, S*Z), Image.NEAREST), (i*S*Z, r*S*Z))
+    prev.save(PREVIEW)
+    print(meta)
