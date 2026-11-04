@@ -40,11 +40,16 @@
       if (s.state === 'sleep') s.state = 'idle';
     }
 
-    function setReaction(r, now) {
-      if (s.state === 'collapse') return; // too busy being dead
+    function setReaction(r, now, ms = c.reactionMs) {
+      if (s.state === 'collapse') return false; // too busy being dead
       s.reaction = r;
-      s.reactionUntil = now + c.reactionMs;
+      s.reactionUntil = now + ms;
+      if (s.state === 'sleep') s.state = 'idle';
+      return true;
     }
+
+    /** Calm it down (petting, snacks). */
+    function soothe(amount) { s.stress = Math.max(0, s.stress - amount); }
 
     function tick(now) {
       const dt = s.lastTick == null ? 0 : Math.min((now - s.lastTick) / 1000, 1);
@@ -90,7 +95,7 @@
       };
     }
 
-    return { key, tick, snapshot, config: c };
+    return { key, tick, snapshot, react: setReaction, soothe, config: c };
   }
 
   const api = { createPet, DEFAULTS };

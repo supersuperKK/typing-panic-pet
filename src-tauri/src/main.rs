@@ -79,6 +79,8 @@ fn build_tray(app: &AppHandle, paused: Arc<AtomicBool>) -> tauri::Result<()> {
     let sens = Submenu::with_items(app, "灵敏度", true, &[&low, &mid, &high])?;
     let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart = CheckMenuItem::with_id(app, "autostart", "开机自启", true, autostart_on, None::<&str>)?;
+    let feed = MenuItem::with_id(app, "feed", "投喂小饼干 🍪", true, None::<&str>)?;
+    let stats = MenuItem::with_id(app, "stats", "今日战绩", true, None::<&str>)?;
     let offwork = MenuItem::with_id(app, "offwork", "下班 / 回来上班", true, None::<&str>)?;
     let home = MenuItem::with_id(app, "home", "回到右下角", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
@@ -90,6 +92,8 @@ fn build_tray(app: &AppHandle, paused: Arc<AtomicBool>) -> tauri::Result<()> {
             &sens,
             &autostart,
             &PredefinedMenuItem::separator(app)?,
+            &feed,
+            &stats,
             &offwork,
             &home,
             &PredefinedMenuItem::separator(app)?,
@@ -133,6 +137,12 @@ fn build_tray(app: &AppHandle, paused: Arc<AtomicBool>) -> tauri::Result<()> {
                         // roll the checkbox back so it never lies
                         let _ = a.set_checked(mgr.is_enabled().unwrap_or(false));
                     }
+                }
+                "feed" => {
+                    let _ = app.emit("pet-feed", ());
+                }
+                "stats" => {
+                    let _ = app.emit("pet-stats", ());
                 }
                 "offwork" => {
                     let _ = app.emit("pet-offwork", ());

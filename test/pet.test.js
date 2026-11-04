@@ -68,3 +68,17 @@ for (const k of [6, 8, 10, 12]) {
   console.log(`${k} keys/s -> collapse after ${t < 600000 ? (t/1000).toFixed(1) + 's' : 'never (10 min)'}`);
 }
 console.log('all tests passed');
+
+// v0.5: interactions
+{
+  const q = createPet();
+  q.tick(0);
+  assert.ok(q.react('poke', 0, 700));
+  assert.strictEqual(q.tick(100).reaction, 'poke');
+  assert.strictEqual(q.tick(800).reaction, null);
+  run(q, 1000, 21000, 10);                // stressed out
+  const before = q.snapshot().stress;
+  q.soothe(25);
+  assert.strictEqual(q.snapshot().stress, Math.max(0, before - 25));
+  console.log('interaction hooks passed');
+}

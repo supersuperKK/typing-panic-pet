@@ -213,6 +213,32 @@ def frame(dx=0, dy=0, sq=0, eyes='open', mouth='w', sweat=0, arms='down', fx=(),
         f.put(x, y + 1, 'white')
     if 'gloom' in fx:
         for x in range(10, 38, 4): f.rect(x, 4, 1, 3, 'gray')
+    if 'heart2' in fx:
+        for (x, y) in ((36, 6), (6, 14)):
+            for (a, b) in ((0, 0), (1, 0), (3, 0), (4, 0), (-1, 1), (0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (5, 1),
+                           (0, 2), (1, 2), (2, 2), (3, 2), (4, 2), (1, 3), (2, 3), (3, 3), (2, 4)): f.put(x + a, y + b, 'pink')
+            f.put(x, y + 1, 'white')
+    if 'heart3' in fx:
+        for (x, y) in ((40, 12), (3, 6)):
+            for (a, b) in ((0, 0), (2, 0), (-1, 1), (0, 1), (1, 1), (2, 1), (3, 1), (0, 2), (1, 2), (2, 2), (1, 3)): f.put(x + a, y + b, 'pink')
+    if 'dizzyA' in fx or 'dizzyB' in fx:
+        pts = ((12, 6), (24, 2), (36, 6)) if 'dizzyA' in fx else ((16, 3), (30, 3), (40, 9))
+        for (x, y) in pts:
+            f.put(x, y - 1, 'gold'); f.put(x, y + 1, 'gold'); f.put(x - 1, y, 'gold'); f.put(x + 1, y, 'gold'); f.put(x, y, 'white')
+    if 'cookie' in fx or 'cookie2' in fx:
+        x, y = 24, 38
+        f.blob(x, y, 5.5, 4.5, 'gold', ol='ol', shade=lambda nx, ny: 'sh' if ny > .3 else 'gold')
+        for (a, b) in ((-2, -1), (1, 0), (-1, 2), (2, -2)): f.put(x + a, y + b, 'ol2')
+        if 'cookie2' in fx:  # bitten
+            for (a, b) in ((3, -3), (4, -2), (4, -3), (5, -1), (3, -2)): f.put(x + a, y + b, 'base')
+    if 'crumbs' in fx:
+        for (x, y) in ((12, 40), (35, 42), (16, 44), (32, 38)): f.put(x, y, 'gold')
+    if 'confA' in fx or 'confB' in fx:
+        cs = ('pink', 'gold', 'leaf', 'sweat', 'red')
+        pts = ((5, 4), (14, 10), (33, 3), (42, 12), (9, 18), (38, 20)) if 'confA' in fx else ((7, 9), (18, 3), (30, 9), (40, 4), (4, 22), (43, 18))
+        for i, (x, y) in enumerate(pts): f.rect(x, y, 2, 2, cs[i % 5])
+    if 'tilde' in fx:
+        for k, o in enumerate((0, 1, 1, 0, 0, 1)): f.put(36 + k, 10 + o, 'ol2')
     return f.im
 
 STRIPS = {
@@ -234,6 +260,18 @@ STRIPS = {
     'offwork':  [frame(eyes='happy', mouth='open', arms='wave1', bag=True), frame(eyes='happy', mouth='open', arms='wave2', bag=True)],
     'walk':     [frame(eyes='happy', mouth='w', feet='walkA', bag=True, facing=1),
                  frame(dy=-1, eyes='happy', mouth='w', feet='walkB', bag=True, facing=1)],
+    # v0.5 interactions
+    'poke':     [frame(sq=4, dy=2, dx=2, eyes='blink', mouth='o', fx=('linesR',)), frame(sq=2, dy=1, dx=1, eyes='dot', mouth='o')],
+    'dizzy':    [frame(dx=-1, eyes='swirl', mouth='wave', fx=('dizzyA',)), frame(dx=1, eyes='swirl', mouth='wave', fx=('dizzyB',))],
+    'happy':    [frame(dx=-1, eyes='happy', mouth='w', fx=('heart2',)), frame(sq=1, dy=1, eyes='happy', mouth='open', fx=('heart3',)),
+                 frame(dx=1, eyes='happy', mouth='w', fx=('heart2',))],
+    'eat':      [frame(eyes='open', mouth='o', fx=('cookie',)), frame(sq=1, dy=1, eyes='happy', mouth='open', fx=('cookie2',)),
+                 frame(eyes='happy', mouth='w', fx=('crumbs',)), frame(sq=1, dy=1, eyes='happy', mouth='open', fx=('crumbs', 'heart'))],
+    'held':     [frame(dy=-2, sq=-2, eyes='wide', mouth='o', arms='up', feet='air', fx=('lines2',)),
+                 frame(dy=-3, sq=-2, dx=1, eyes='wide', mouth='o', arms='up', feet='air', fx=('linesR',))],
+    'stretch':  [frame(sq=-3, dy=-2, eyes='sleep', mouth='o', arms='up'), frame(sq=-1, eyes='happy', mouth='w', arms='up', fx=('tilde',))],
+    'cheer':    [frame(dy=-6, sq=-2, eyes='happy', mouth='open', arms='up', feet='air', fx=('confA',)),
+                 frame(sq=2, dy=1, eyes='happy', mouth='open', arms='up', fx=('confB',))],
 }
 
 meta = {}
