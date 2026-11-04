@@ -1,0 +1,45 @@
+# Push a tag like v0.4.0 and GitHub builds Windows + macOS installers into a draft Release.
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ''
+          - platform: macos-latest          # Apple Silicon
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-latest          # Intel Mac
+            args: '--target x86_64-apple-darwin'
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+      - run: npm ci
+      - run: npm test
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Typing Panic Pet ${{ github.ref_name }}'
+          releaseBody: '打字越快越慌的桌面宠物。Windows 下载 .msi 或 -setup.exe；Mac 下载对应芯片的 .dmg。'
+          releaseDraft: true
+          args: ${{ matrix.args }}

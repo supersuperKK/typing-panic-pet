@@ -1,0 +1,13 @@
+{
+  "name": "typing-panic-pet",
+  "version": "0.4.0",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "test": "node test/pet.test.js && node test/offwork.test.js"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
