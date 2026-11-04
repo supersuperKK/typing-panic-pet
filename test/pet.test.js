@@ -14,17 +14,17 @@ function run(pet, fromMs, toMs, kpsTyping, stepMs = 50) {
 let p = createPet();
 assert.strictEqual(p.tick(0).state, 'idle');
 
-// 2. Gentle typing (2 kps) for a minute stays idle.
-assert.strictEqual(run(p, 0, 60000, 2).state, 'idle');
+// 2. Very gentle typing (1 kps) for a minute stays idle.
+assert.strictEqual(run(p, 0, 60000, 1).state, 'idle');
 
 // 3. A short burst (8 kps for 4s) makes it nervous but not dead.
 p = createPet();
 let s = run(p, 0, 4000, 8);
 assert.strictEqual(s.state, 'nervous', JSON.stringify(s));
 
-// 3b. Steady 4 kps: alert, not nervous.
+// 3b. Steady 2 kps: alert, not nervous.
 p = createPet();
-s = run(p, 0, 15000, 4);
+s = run(p, 0, 15000, 2);
 assert.strictEqual(s.state, 'alert', JSON.stringify(s));
 
 // 3c. Sustained 10 kps passes through panic before collapse.
@@ -43,7 +43,7 @@ s = run(p, collapsedAt, collapsedAt + 5000, 10);
 assert.strictEqual(s.state, 'collapse');
 
 // 6. Recovers after you stop and stress drains.
-s = run(p, collapsedAt + 5000, collapsedAt + 60000, 0);
+s = run(p, collapsedAt + 5000, collapsedAt + 95000, 0);
 assert.strictEqual(s.state, 'idle', JSON.stringify(s));
 
 // 7. Reactions.
@@ -61,8 +61,13 @@ s = run(p, 0, 5 * 60 * 1000 + 1000, 0, 1000);
 assert.strictEqual(s.state, 'sleep');
 p.key('key', 301500); assert.strictEqual(p.tick(301510).state, 'idle');
 
+// 9. v0.6: normal typing (4 kps) collapses it in about a minute, not several.
+{ const q = createPet(); let t = 0, n = 0;
+  while (t < 300000) { while (n <= t) { q.key('key', n); n += 250; } if (q.tick(t).state === 'collapse') break; t += 50; }
+  assert.ok(t > 40000 && t < 90000, 'collapse at 4 kps after ' + t + 'ms'); }
+
 // Report how long to collapse at various speeds.
-for (const k of [6, 8, 10, 12]) {
+for (const k of [3, 4, 6, 8]) {
   const q = createPet(); let t = 0, n = 0;
   while (t < 600000) { while (n <= t) { q.key('key', n); n += 1000 / k; } if (q.tick(t).state === 'collapse') break; t += 50; }
   console.log(`${k} keys/s -> collapse after ${t < 600000 ? (t/1000).toFixed(1) + 's' : 'never (10 min)'}`);

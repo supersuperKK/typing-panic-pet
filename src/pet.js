@@ -3,14 +3,14 @@
   const DEFAULTS = {
     windowMs: 3000,       // KPS is measured over the last 3 seconds
     smooth: 0.15,         // EMA factor for KPS (lower = calmer face)
-    calmKps: 3,           // below this, stress drains
-    alertKps: 2.5,        // smoothed KPS above this = alert (watching you)
-    alertStress: 15,
-    nervousKps: 5,        // smoothed KPS above this = nervous
-    nervousStress: 40,    // or stress above this = nervous
-    gain: 0.2,            // stress gained per second per KPS above calmKps (~3 min of fast typing to collapse)
-    decay: 2,             // stress lost per second when calm
-    panicStress: 70,      // stress above this = running around screaming
+    calmKps: 1.5,         // below this, stress drains (v0.6: was 3, too forgiving)
+    alertKps: 1.5,        // smoothed KPS above this = alert (watching you)
+    alertStress: 12,
+    nervousKps: 3.5,      // smoothed KPS above this = nervous
+    nervousStress: 35,    // or stress above this = nervous
+    gain: 0.6,            // stress per second per KPS above calmKps (~1 min of normal 4 kps typing to collapse)
+    decay: 1.2,           // stress lost per second when calm
+    panicStress: 65,      // stress above this = running around screaming
     collapseAt: 100,      // stress that knocks it out
     recoverBelow: 30,     // must drop below this...
     recoverIdleMs: 3000,  // ...and you must stop typing this long to wake it

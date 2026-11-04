@@ -5,12 +5,12 @@ use device_query::{DeviceQuery, DeviceState, Keycode};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewWindow};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 const WIN_W: f64 = 200.0;
@@ -40,8 +40,93 @@ fn classify(n: &str, held: &HashSet<String>) -> &'static str {
     }
 }
 
+// ---- v0.6: keyboard permission (macOS needs Accessibility for global key state) ----
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> u8;
+}
+
+fn has_keyboard_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe { AXIsProcessTrusted() != 0 }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+#[tauri::command]
+fn keyboard_permission() -> bool {
+    has_keyboard_permission()
+}
+
+#[tauri::command]
+fn open_permission_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn();
+    }
+}
+
+// ---- v0.6: click-through everywhere except on the pet itself ----
+/// The pet's body as an ellipse, in CSS pixels relative to the window (rx = 0: hidden).
+#[derive(Clone, Copy, Default)]
+struct Hitbox {
+    cx: f64,
+    cy: f64,
+    rx: f64,
+    ry: f64,
+}
+
+struct HitState {
+    box_: Mutex<Hitbox>,
+    force_through: AtomicBool,
+}
+
+#[tauri::command]
+fn set_hitbox(state: State<'_, Arc<HitState>>, cx: f64, cy: f64, rx: f64, ry: f64) {
+    if let Ok(mut b) = state.box_.lock() {
+        *b = Hitbox { cx, cy, rx, ry };
+    }
+}
+
+fn spawn_hit_tester(app: AppHandle, hit: Arc<HitState>) {
+    thread::spawn(move || {
+        let mut ignoring: Option<bool> = None;
+        loop {
+            thread::sleep(Duration::from_millis(40));
+            let Some(win) = app.get_webview_window("main") else { continue };
+            let b = hit.box_.lock().map(|b| *b).unwrap_or_default();
+            let inside = match (win.cursor_position(), win.outer_position(), win.scale_factor()) {
+                (Ok(c), Ok(p), Ok(s)) if b.rx > 0.0 && b.ry > 0.0 => {
+                    let x = (c.x - p.x as f64) / s - b.cx;
+                    let y = (c.y - p.y as f64) / s - b.cy;
+                    (x / b.rx).powi(2) + (y / b.ry).powi(2) <= 1.0
+                }
+                _ => false,
+            };
+            let want = hit.force_through.load(Ordering::Relaxed) || !inside;
+            if ignoring != Some(want) {
+                if win.set_ignore_cursor_events(want).is_ok() {
+                    ignoring = Some(want);
+                }
+            }
+        }
+    });
+}
+
 fn spawn_keyboard_watcher(app: AppHandle, paused: Arc<AtomicBool>) {
     thread::spawn(move || {
+        // On macOS DeviceState::new() panics without the Accessibility permission (and with
+        // panic = "abort" that would take the whole app down), so wait for it first.
+        while !has_keyboard_permission() {
+            thread::sleep(Duration::from_secs(2));
+        }
         let device = DeviceState::new();
         let mut prev: HashSet<String> = HashSet::new();
         loop {
@@ -70,9 +155,9 @@ fn go_home(win: &WebviewWindow) {
     }
 }
 
-fn build_tray(app: &AppHandle, paused: Arc<AtomicBool>) -> tauri::Result<()> {
+fn build_tray(app: &AppHandle, paused: Arc<AtomicBool>, hit: Arc<HitState>) -> tauri::Result<()> {
     let pause = CheckMenuItem::with_id(app, "pause", "暂停感知键盘", true, false, None::<&str>)?;
-    let through = CheckMenuItem::with_id(app, "through", "鼠标穿透（不挡点击）", true, false, None::<&str>)?;
+    let through = CheckMenuItem::with_id(app, "through", "完全穿透（摸不到团子）", true, false, None::<&str>)?;
     let low = CheckMenuItem::with_id(app, "sens_low", "低：我本来就打字快", true, false, None::<&str>)?;
     let mid = CheckMenuItem::with_id(app, "sens_mid", "中：默认", true, true, None::<&str>)?;
     let high = CheckMenuItem::with_id(app, "sens_high", "高：一敲就慌", true, false, None::<&str>)?;
@@ -117,10 +202,8 @@ fn build_tray(app: &AppHandle, paused: Arc<AtomicBool>) -> tauri::Result<()> {
                     let _ = app.emit("pet-paused", on);
                 }
                 "through" => {
-                    let on = t.is_checked().unwrap_or(false);
-                    if let Some(w) = &win {
-                        let _ = w.set_ignore_cursor_events(on);
-                    }
+                    // the hit tester applies it on its next pass
+                    hit.force_through.store(t.is_checked().unwrap_or(false), Ordering::Relaxed);
                 }
                 id @ ("sens_low" | "sens_mid" | "sens_high") => {
                     // behave like radio buttons
@@ -171,13 +254,17 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
+        .invoke_handler(tauri::generate_handler![set_hitbox, keyboard_permission, open_permission_settings])
         .setup(|app| {
             let paused = Arc::new(AtomicBool::new(false));
+            let hit = Arc::new(HitState { box_: Mutex::new(Hitbox::default()), force_through: AtomicBool::new(false) });
+            app.manage(hit.clone());
             if let Some(win) = app.get_webview_window("main") {
                 go_home(&win);
             }
-            build_tray(app.handle(), paused.clone())?;
+            build_tray(app.handle(), paused.clone(), hit.clone())?;
             spawn_keyboard_watcher(app.handle().clone(), paused);
+            spawn_hit_tester(app.handle().clone(), hit);
             Ok(())
         })
         .run(tauri::generate_context!())

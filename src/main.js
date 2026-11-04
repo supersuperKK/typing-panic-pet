@@ -1,12 +1,12 @@
 const META = { size: 48, scale: 3 };
 const FRAMES = { idle: 4, alert: 2, nervous: 4, panic: 4, collapse: 2, sleep: 2, jump: 3, thumbs: 2, facepalm: 2, offwork: 2, walk: 2,
-  poke: 2, dizzy: 2, happy: 3, eat: 4, held: 2, stretch: 2, cheer: 2 };
+  poke: 2, dizzy: 2, happy: 3, eat: 4, held: 2, stretch: 2, cheer: 2, deaf: 2 };
 const ANIM = {
   idle: { fps: 3 }, alert: { fps: 4 }, nervous: { fps: 12 }, panic: { fps: 10 },
   collapse: { fps: 2 }, sleep: { fps: 1.5 }, jump: { fps: 8, once: true },
   thumbs: { fps: 4 }, facepalm: { fps: 3 }, offwork: { fps: 4 }, walk: { fps: 6 },
   poke: { fps: 6, once: true }, dizzy: { fps: 4 }, happy: { fps: 4 }, eat: { fps: 3 },
-  held: { fps: 6 }, stretch: { fps: 1.5 }, cheer: { fps: 5 },
+  held: { fps: 6 }, stretch: { fps: 1.5 }, cheer: { fps: 5 }, deaf: { fps: 1.5 },
 };
 // how long each interaction reaction stays on screen (ms)
 const HOLD = { poke: 700, dizzy: 2400, happy: 1800, eat: 2600, stretch: 3500, cheer: 2200, held: 500 };
@@ -30,12 +30,14 @@ const LINES = {
   land: ['呼，落地', '新家不错'],
   stretch: ['敲了快一小时了，起来动动吧～', '伸个懒腰，喝口水？'],
   deadpoke: ['别戳了…我已经没了', '……（没反应）'],
+  deaf: ['我听不到键盘…点我一下去开权限'],
+  deafpoke: ['在「辅助功能」里把我打开就好', '打开了还听不到？重启我一下'],
 };
 // Tray → 灵敏度
 const SENS = {
-  low:  { calmKps: 4, alertKps: 3.5, nervousKps: 6.5, gain: 0.12 },
-  mid:  { calmKps: 3, alertKps: 2.5, nervousKps: 5,   gain: 0.2 },
-  high: { calmKps: 2, alertKps: 1.8, nervousKps: 4,   gain: 0.35 },
+  low:  { calmKps: 2.5, alertKps: 2.5, nervousKps: 5,   gain: 0.4 },
+  mid:  { calmKps: 1.5, alertKps: 1.5, nervousKps: 3.5, gain: 0.6 },
+  high: { calmKps: 1,   alertKps: 1,   nervousKps: 2.5, gain: 0.9 },
 };
 
 const pet = PetBrain.createPet();
@@ -47,9 +49,19 @@ window.addEventListener('beforeunload', saveStats);
 const $pet = document.getElementById('pet');
 const $sprite = document.getElementById('sprite');
 const $bubble = document.getElementById('bubble');
-const $fill = document.getElementById('fill');
+// v0.6: the sprout on its head is the stress meter (0 perky … 3 withered)
+const STAGE_AT = [25, 50, 75];
+let stage = 0;
+function sproutStage(stress) {
+  // a little hysteresis so the leaves don't flicker at a boundary
+  while (stage < 3 && stress >= STAGE_AT[stage] + 3) stage++;
+  while (stage > 0 && stress < STAGE_AT[stage - 1] - 3) stage--;
+  return stage;
+}
+let permOk = true;   // macOS: false until the keyboard (Accessibility) permission is granted
+const invoke = (cmd, args) => (window.__TAURI__ ? window.__TAURI__.core.invoke(cmd, args) : Promise.resolve(null));
 
-let anim = '', animStart = 0, lineKey = '';
+let anim = '', animFile = '', animStart = 0, lineKey = '';
 let paused = false;
 // off-work phases: null → 'offwork' (wave) → 'walk' → 'gone' ⇄ 'peek'
 let phase = null, phaseAt = 0;
@@ -88,10 +100,12 @@ function say(key) {
   $bubble.classList.toggle('show', !!line);
 }
 
-function setAnim(name, now) {
-  if (name === anim) return;
-  anim = name; animStart = now;
-  $sprite.style.backgroundImage = `url(sprites/${name}.png)`;
+function setAnim(name, now, st = 0) {
+  const file = (st && name !== 'collapse') ? `${name}-s${st}` : name;
+  if (name !== anim) { anim = name; animStart = now; }
+  if (file === animFile) return;
+  animFile = file;
+  $sprite.style.backgroundImage = `url(sprites/${file}.png)`;
   $sprite.style.backgroundSize = `${FRAMES[name] * META.size * META.scale}px ${META.size * META.scale}px`;
 }
 
@@ -120,6 +134,7 @@ function onKey(kind, now) {
 // ---- mouse: poke, rub, feed, carry ----
 function interact(kind, now) {
   if (phase) return;
+  if (!permOk) { invoke('open_permission_settings'); return sayText(pick(LINES.deafpoke), 3000, now); }
   override = null; hoverAt = null;
   const d = new Date();
   const dead = pet.snapshot().state === 'collapse';
@@ -200,6 +215,7 @@ function render(now) {
   else if (phase === 'walk') { name = 'walk'; line = 'walk'; cls = 'walk'; }
   else if (phase === 'gone') { name = 'walk'; line = 'gone'; cls = 'gone'; }
   else if (phase === 'peek') { name = 'alert'; line = 'peek'; cls = 'peek flip'; }
+  else if (!permOk && !snap.reaction) { name = 'deaf'; line = 'deaf'; cls = 'idle'; }
   else if (paused && !snap.reaction) { name = 'sleep'; line = 'paused'; cls = 'idle'; }
   else {
     name = snap.reaction || snap.state; line = name;
@@ -207,7 +223,7 @@ function render(now) {
     cls = snap.state + (flip ? ' flip' : '') + (snap.reaction === 'held' ? ' held' : '');
   }
   if (lineKey === 'back' && name === 'jump') line = 'back';
-  setAnim(name, now);
+  setAnim(name, now, sproutStage(snap.stress));
   say(line);
   $pet.className = cls;
 
@@ -216,8 +232,22 @@ function render(now) {
   f = a.once ? Math.min(f, n - 1) : f % n;
   $sprite.style.backgroundPosition = `${-f * META.size * META.scale}px 0`;
 
-  $fill.style.width = snap.stress + '%';
-  $fill.style.background = snap.stress > 70 ? '#ef6a6a' : snap.stress > 40 ? '#ffb15c' : '#7fcf6a';
+  sendHitbox(phase === 'gone');
+}
+
+// v0.6: tell the native side where the pet's body is, so clicks anywhere else on the
+// transparent window fall through to the desktop.
+let lastBox = '';
+function sendHitbox(hidden) {
+  if (!window.__TAURI__) return;
+  const r = $sprite.getBoundingClientRect();
+  // the body + sprout fill roughly the middle 80% of the 48px frame
+  const box = hidden ? { cx: 0, cy: 0, rx: 0, ry: 0 }
+    : { cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height * 0.56), rx: Math.round(r.width * 0.42), ry: Math.round(r.height * 0.4) };
+  const key = `${box.cx},${box.cy},${box.rx},${box.ry}`;
+  if (key === lastBox) return;
+  lastBox = key;
+  invoke('set_hitbox', box);
 }
 
 if (window.__TAURI__) {
@@ -228,6 +258,8 @@ if (window.__TAURI__) {
   listen('pet-offwork', () => { const now = performance.now(); phase ? comeBack(now) : leave(now); });
   listen('pet-feed', () => interact('feed', performance.now()));
   listen('pet-stats', () => sayText(statsLine(), 4000, performance.now()));
+  const checkPerm = () => invoke('keyboard_permission').then((ok) => { permOk = ok !== false; });
+  checkPerm(); setInterval(checkPerm, 3000);
   window.__TAURI__.window.getCurrentWindow().onMoved(() => { if (dragging) lastMoveAt = performance.now(); });
 } else {
   // Plain browser preview: keys typed in this page; F2 = clock out, F3 = feed, F4 = stats.
@@ -244,6 +276,17 @@ if (window.__TAURI__) {
   });
 }
 
-for (const name of Object.keys(FRAMES)) new Image().src = `sprites/${name}.png`;
+for (const name of Object.keys(FRAMES)) {
+  new Image().src = `sprites/${name}.png`;
+  if (name !== 'collapse') for (let k = 1; k <= 3; k++) new Image().src = `sprites/${name}-s${k}.png`;
+}
+
+// v0.6: first launch says hello and what it does (and doesn't) look at
+if (!localStorage.getItem('pet.welcomed')) {
+  localStorage.setItem('pet.welcomed', '1');
+  const t0 = performance.now();
+  sayText('你好，我是团子！', 2600, t0);
+  setTimeout(() => sayText('我只数你敲了几下，不看你打了什么', 4200, performance.now()), 2700);
+}
 function loop(now) { render(now); requestAnimationFrame(loop); }
 requestAnimationFrame(loop);

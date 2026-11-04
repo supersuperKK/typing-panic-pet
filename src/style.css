@@ -39,9 +39,6 @@ html, body {
   opacity: 0; transition: opacity .2s;
 }
 #bubble.show { opacity: 1; }
-#meter { width: 80px; height: 6px; margin-top: 6px; background: rgba(122,74,64,.18); border: 1px solid rgba(122,74,64,.55); border-radius: 3px; overflow: hidden; transition: opacity .3s; }
-#fill { height: 100%; width: 0; background: #7fcf6a; transition: width .2s, background .2s; }
-.gone #meter, .walk #meter, .peek #meter { opacity: 0; }
 
 /* v0.5: a little wobble when poked, a sway when carried */
 .held #sprite { animation: sway .5s ease-in-out infinite alternate; transform-origin: 50% 10%; }
