@@ -3,6 +3,7 @@
   "version": "0.4.0",
   "private": true,
   "scripts": {
+    "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
     "test": "node test/pet.test.js && node test/offwork.test.js"
