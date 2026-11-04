@@ -12,8 +12,9 @@
     decay: 1.2,           // stress lost per second when calm
     panicStress: 65,      // stress above this = running around screaming
     collapseAt: 100,      // stress that knocks it out
-    recoverBelow: 30,     // must drop below this...
-    recoverIdleMs: 3000,  // ...and you must stop typing this long to wake it
+    recoverBelow: 30,     // gets back up once stress drops below this
+    collapseDecay: 5,     // v0.6.1: while knocked out it can't hear you, stress drains this fast
+                          // (~14 s), even if you keep typing - before, typing kept it dead forever
     sleepAfterMs: 5 * 60 * 1000,
     reactionMs: 900,      // how long a backspace/enter/save reaction shows
   };
@@ -59,14 +60,15 @@
       const raw = s.presses.length / (c.windowMs / 1000);
       s.kps += (raw - s.kps) * c.smooth;
 
-      if (raw > c.calmKps) s.stress += (raw - c.calmKps) * c.gain * dt;
+      if (s.state === 'collapse') s.stress -= c.collapseDecay * dt;
+      else if (raw > c.calmKps) s.stress += (raw - c.calmKps) * c.gain * dt;
       else s.stress -= c.decay * dt;
       s.stress = Math.max(0, Math.min(c.collapseAt, s.stress));
 
       const idleMs = s.lastKeyAt == null ? Infinity : now - s.lastKeyAt;
 
       if (s.state === 'collapse') {
-        if (s.stress < c.recoverBelow && idleMs >= c.recoverIdleMs) s.state = 'idle';
+        if (s.stress < c.recoverBelow) s.state = 'idle';
       } else if (s.stress >= c.collapseAt) {
         s.state = 'collapse';
         s.reaction = null;

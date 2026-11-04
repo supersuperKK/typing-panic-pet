@@ -34,17 +34,23 @@ for (const st of ['alert', 'nervous', 'panic', 'collapse']) assert.ok(seen.has(s
 
 // 4. Sustained hammering (10 kps) eventually collapses it.
 p = createPet();
-s = run(p, 0, 120000, 10);
-assert.strictEqual(s.state, 'collapse', JSON.stringify(s));
-const collapsedAt = 120000;
+let collapsedAt = null;
+{ let n = 0; for (let t = 0; t <= 120000; t += 50) { while (n <= t) { p.key('key', n); n += 100; } s = p.tick(t); if (s.state === 'collapse') { collapsedAt = t; break; } } }
+assert.ok(collapsedAt != null, 'never collapsed');
 
 // 5. Still collapsed while you keep typing.
-s = run(p, collapsedAt, collapsedAt + 5000, 10);
+s = run(p, collapsedAt + 50, collapsedAt + 5000, 10);
 assert.strictEqual(s.state, 'collapse');
 
 // 6. Recovers after you stop and stress drains.
 s = run(p, collapsedAt + 5000, collapsedAt + 95000, 0);
 assert.strictEqual(s.state, 'idle', JSON.stringify(s));
+
+// 6b. v0.6.1: keeps typing after collapse -> still gets back up within ~15 s.
+{ const q = createPet(); let t0 = 0, n = 0;
+  for (; t0 <= 120000; t0 += 50) { while (n <= t0) { q.key('key', n); n += 100; } if (q.tick(t0).state === 'collapse') break; }
+  const r = run(q, t0 + 50, t0 + 16000, 6);
+  assert.notStrictEqual(r.state, 'collapse', JSON.stringify(r)); }
 
 // 7. Reactions.
 p = createPet();
