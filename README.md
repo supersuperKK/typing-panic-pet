@@ -90,3 +90,7 @@ tools/          make_sprites.py 精灵图生成脚本、preview.png 预览
 - ~~第二步：像素精灵图 + 警觉、恐慌状态~~ ✅
 - ~~第三步：17:30 背包下班、托盘菜单、鼠标穿透~~ ✅
 - ~~第四步：开机自启、打包发布~~ ✅
+
+## 作者
+- 创意与产品：**KK**（[@supersuperKK](https://github.com/supersuperKK)）
+- 设计与开发：**Hark**，和 KK 一起一步步做出来的 🐾
