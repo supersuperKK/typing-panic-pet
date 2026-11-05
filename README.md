@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">打字恐慌桌宠</h1>
-
+<h2 align="center">老板不在好无聊，于是怀着这样的心情做了</h2>
 <p align="center">一颗住在屏幕右下角的糯米团。你打字越快，它越慌。</p>
 
 <p align="center">
